@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, Fragment } from 'react'
+import { createPortal } from 'react-dom'
 import { useParams, Link } from 'react-router-dom'
 import { fetchScan, fetchOverrides, postOverride, proposeFix, fetchScanFixes, postGithubFixComment } from '../api'
 import SeverityBadge from '../components/SeverityBadge'
@@ -29,16 +30,45 @@ export default function ScanDetail() {
   const [fixCache, setFixCache] = useState({})
   const [fixList, setFixList] = useState([])
   const [expandedDiffs, setExpandedDiffs] = useState({})
-  const [ghPostModal, setGhPostModal] = useState(null) // { proposalId, token, busy, error }
+  const [ghPostBusyId, setGhPostBusyId] = useState(null)
+  const [ghPostSuccess, setGhPostSuccess] = useState(null) // { commentUrl, prNumber, repository }
+  const [ghPostError, setGhPostError] = useState(null) // { proposalId, message }
+  const [ghPatModal, setGhPatModal] = useState(null) // { proposalId, token, busy, error }
+
+  const hydrateFixes = (items) => {
+    setFixList(items)
+    if (!items.length) return
+    setFixCache((cache) => {
+      const next = { ...cache }
+      for (const item of items) {
+        if (!item.finding_id || next[item.finding_id]) continue
+        next[item.finding_id] = {
+          proposal_id: item.id,
+          status: item.status,
+          validation_errors: item.validation_errors,
+          unified_diff_preview: item.unified_diff_preview,
+          github_comment_id: item.github_comment_id,
+        }
+      }
+      return next
+    })
+  }
 
   useEffect(() => {
     fetchScan(scanId).then(setScan).catch(() => setScan(null))
-    fetchScanFixes(scanId).then((d) => setFixList(d.items || [])).catch(() => setFixList([]))
+    fetchScanFixes(scanId).then((d) => hydrateFixes(d.items || [])).catch(() => hydrateFixes([]))
     fetchOverrides().then((d) => setOverrides(d.items || [])).catch(() => {})
   }, [scanId])
 
   const refreshFixes = () => {
-    fetchScanFixes(scanId).then((d) => setFixList(d.items || [])).catch(() => {})
+    fetchScanFixes(scanId).then((d) => hydrateFixes(d.items || [])).catch(() => {})
+  }
+
+  const proposalForFinding = (findingId) => {
+    const cached = fixCache[findingId]
+    if (cached?.proposal_id) return cached
+    const stored = fixList.find((x) => x.finding_id === findingId && x.id)
+    return stored ? { ...cached, proposal_id: stored.id, github_comment_id: stored.github_comment_id, status: stored.status, unified_diff_preview: stored.unified_diff_preview ?? cached?.unified_diff_preview } : cached
   }
 
   const runSuggestFix = async (findingId) => {
@@ -54,31 +84,146 @@ export default function ScanDetail() {
     }
   }
 
-  const openGhPostModal = (proposalId) => {
-    setGhPostModal({ proposalId, token: '', busy: false, error: '' })
+  const closeGhPatModal = () => {
+    if (ghPatModal?.busy) return
+    setGhPatModal(null)
   }
 
-  const closeGhPostModal = () => {
-    if (ghPostModal?.busy) return
-    setGhPostModal(null)
-  }
-
-  const submitGhPost = async () => {
-    if (!ghPostModal?.proposalId) return
-    setGhPostModal((m) => ({ ...m, busy: true, error: '' }))
+  const postToGithubPr = async (proposalId, githubToken = '') => {
+    setGhPostError(null)
+    setGhPostSuccess(null)
+    setGhPostBusyId(proposalId)
     try {
-      const trimmed = (ghPostModal.token || '').trim()
-      await postGithubFixComment(ghPostModal.proposalId, trimmed)
+      const res = await postGithubFixComment(proposalId, githubToken)
+      if (!res?.posted) {
+        throw new Error('Server did not confirm the GitHub comment was posted')
+      }
       refreshFixes()
-      setGhPostModal(null)
+      setGhPatModal(null)
+      setGhPostSuccess({
+        commentUrl: res.comment_url || null,
+        prNumber: res.pr_number ?? scan?.pr_number,
+        repository: res.repository ?? scan?.repository,
+        githubCommentId: res.github_comment_id || null,
+      })
     } catch (err) {
-      setGhPostModal((m) => ({
-        ...m,
-        busy: false,
-        error: err.message || String(err),
-      }))
+      const msg = err.message || String(err)
+      if (/no github token/i.test(msg)) {
+        setGhPatModal({ proposalId, token: '', busy: false, error: msg })
+      } else {
+        setGhPostError({ proposalId, message: msg })
+        setGhPatModal(null)
+      }
+    } finally {
+      setGhPostBusyId(null)
     }
   }
+
+  const submitGhPatPost = async () => {
+    if (!ghPatModal?.proposalId) return
+    const token = (ghPatModal.token || '').trim()
+    if (!token) {
+      setGhPatModal((m) => ({ ...m, error: 'Paste a GitHub PAT with repo scope, or set GITHUB_TOKEN on the API server.' }))
+      return
+    }
+    setGhPatModal((m) => ({ ...m, busy: true, error: '' }))
+    await postToGithubPr(ghPatModal.proposalId, token)
+  }
+
+  const closeGhPostSuccess = () => setGhPostSuccess(null)
+
+  const ghModals = (ghPatModal || ghPostSuccess) && createPortal(
+    <>
+      {ghPatModal && (
+        <div className="modal-backdrop" onClick={closeGhPatModal} role="presentation">
+          <div
+            className="modal-card-solid"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="gh-pat-title"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 id="gh-pat-title" className="modal-title">GitHub token required</h3>
+            <p className="modal-body-text">
+              The API server has no <code>GITHUB_TOKEN</code>. Paste a PAT with <code>repo</code> scope to post the autofix comment.
+            </p>
+            <label className="auth-label" htmlFor="gh-pat-input">GitHub PAT</label>
+            <input
+              id="gh-pat-input"
+              type="password"
+              autoComplete="off"
+              placeholder="github_pat_…"
+              value={ghPatModal.token}
+              disabled={ghPatModal.busy}
+              onChange={(e) => setGhPatModal((m) => ({ ...m, token: e.target.value, error: '' }))}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !ghPatModal.busy) submitGhPatPost()
+                if (e.key === 'Escape' && !ghPatModal.busy) closeGhPatModal()
+              }}
+            />
+            {ghPatModal.error && (
+              <div className="fix-error" style={{ marginTop: '0.75rem' }}>
+                {ghPatModal.error}
+              </div>
+            )}
+            <div className="modal-actions">
+              <button type="button" className="btn btn-ghost" disabled={ghPatModal.busy} onClick={closeGhPatModal}>
+                Cancel
+              </button>
+              <button type="button" className="btn" disabled={ghPatModal.busy} onClick={submitGhPatPost}>
+                {ghPatModal.busy ? 'Posting…' : 'Post comment'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {ghPostSuccess && (
+        <div className="modal-backdrop modal-backdrop-success" onClick={closeGhPostSuccess} role="presentation">
+          <div
+            className="modal-card-solid modal-card-success"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="gh-post-success-title"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="modal-success-icon" aria-hidden="true">
+              <CheckCircle size={40} strokeWidth={2.5} />
+            </div>
+            <h2 id="gh-post-success-title" className="modal-success-headline">
+              Comment posted to PR successfully
+            </h2>
+            <p className="modal-body-text modal-success-message">
+              Fix posted on the pull request for the misconfigured infrastructure.
+            </p>
+            {(ghPostSuccess.repository || ghPostSuccess.prNumber != null) && (
+              <p className="modal-success-meta">
+                {ghPostSuccess.repository || 'Repository'}
+                {ghPostSuccess.prNumber != null ? ` · PR #${ghPostSuccess.prNumber}` : ''}
+              </p>
+            )}
+            {ghPostSuccess.commentUrl && (
+              <a
+                href={ghPostSuccess.commentUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="btn btn-ghost modal-success-link"
+              >
+                <ExternalLink size={16} />
+                View comment on GitHub
+              </a>
+            )}
+            <div className="modal-actions modal-actions-center">
+              <button type="button" className="btn modal-ok-btn" onClick={closeGhPostSuccess} autoFocus>
+                OK
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>,
+    document.body,
+  )
 
   const toggleDiff = (findingId) => {
     setExpandedDiffs((prev) => ({ ...prev, [findingId]: !prev[findingId] }))
@@ -127,6 +272,8 @@ export default function ScanDetail() {
   if (!scan) return <p style={{ color: '#94a3b8' }}>Loading scan #{scanId}...</p>
 
   return (
+    <>
+    {ghModals}
     <div className="page">
       <div className="panel card-elevated">
         <div className="page-header">
@@ -167,9 +314,13 @@ export default function ScanDetail() {
             </tr>
           </thead>
           <tbody>
-            {filtered.map((f) => (
+            {filtered.map((f) => {
+              const proposal = proposalForFinding(f.id)
+              const proposalId = proposal?.proposal_id
+              const alreadyPosted = Boolean(proposal?.github_comment_id)
+              return (
               <Fragment key={f.id}>
-                <tr>
+              <tr>
                 <td>{f.finding_type}</td>
                 <td><SeverityBadge severity={f.severity} /></td>
                 <td>
@@ -316,15 +467,38 @@ export default function ScanDetail() {
                                 Copy diff
                               </button>
                             )}
-                            {fixCache[f.id].proposal_id && scan?.pr_number != null && (
+                            {ghPostError?.proposalId === proposalId && (
+                              <div className="fix-error" style={{ width: '100%' }}>
+                                <AlertCircle />
+                                {ghPostError.message}
+                              </div>
+                            )}
+                            {proposalId && scan?.pr_number != null && (
+                              alreadyPosted ? (
+                                <span className="subtle" style={{ fontSize: '0.85rem' }}>
+                                  <CheckCircle style={{ width: 14, height: 14, verticalAlign: 'middle', marginRight: 4, color: 'var(--success)' }} />
+                                  Posted to PR #{scan.pr_number}
+                                </span>
+                              ) : (
                               <button 
                                 type="button" 
-                                onClick={() => openGhPostModal(fixCache[f.id].proposal_id)} 
+                                onClick={() => postToGithubPr(proposalId)} 
                                 className="btn"
+                                disabled={ghPostBusyId === proposalId}
                               >
-                                <ExternalLink />
-                                Post to GitHub PR
+                                {ghPostBusyId === proposalId ? (
+                                  <Loader2 className="spinner" />
+                                ) : (
+                                  <ExternalLink />
+                                )}
+                                {ghPostBusyId === proposalId ? 'Posting…' : 'Post to GitHub PR'}
                               </button>
+                              )
+                            )}
+                            {proposalId && scan?.pr_number == null && (
+                              <span className="subtle" style={{ fontSize: '0.85rem' }}>
+                                PR number missing — run scan from GitHub Actions on a pull request.
+                              </span>
                             )}
                           </div>
                         </>
@@ -334,7 +508,7 @@ export default function ScanDetail() {
                 </tr>
               )}
               </Fragment>
-            ))}
+            )})}
             {filtered.length === 0 && <tr><td colSpan={6} style={{ textAlign: 'center', color: '#64748b' }}>No findings.</td></tr>}
           </tbody>
           </table>
@@ -362,51 +536,8 @@ export default function ScanDetail() {
         </div>
       </div>
 
-      {ghPostModal && (
-        <div className="modal-backdrop" onClick={closeGhPostModal} role="presentation">
-          <div
-            className="panel modal-card"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="gh-post-title"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <h3 id="gh-post-title" style={{ marginTop: 0 }}>Post autofix to GitHub PR</h3>
-            <p className="subtle" style={{ marginTop: 0 }}>
-              Optional: paste a GitHub PAT to post as your account. Leave blank to use the server{' '}
-              <code>GITHUB_TOKEN</code> from <code>.env</code>.
-            </p>
-            <label className="auth-label" htmlFor="gh-pat-input">GitHub PAT (optional)</label>
-            <input
-              id="gh-pat-input"
-              type="password"
-              autoComplete="off"
-              placeholder="ghp_… or github_pat_…"
-              value={ghPostModal.token}
-              disabled={ghPostModal.busy}
-              onChange={(e) => setGhPostModal((m) => ({ ...m, token: e.target.value, error: '' }))}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' && !ghPostModal.busy) submitGhPost()
-                if (e.key === 'Escape' && !ghPostModal.busy) closeGhPostModal()
-              }}
-            />
-            {ghPostModal.error && (
-              <div className="fix-error" style={{ marginTop: '0.75rem' }}>
-                {ghPostModal.error}
-              </div>
-            )}
-            <div style={{ display: 'flex', gap: '0.5rem', marginTop: '1rem', justifyContent: 'flex-end' }}>
-              <button type="button" className="btn btn-ghost" disabled={ghPostModal.busy} onClick={closeGhPostModal}>
-                Cancel
-              </button>
-              <button type="button" className="btn" disabled={ghPostModal.busy} onClick={submitGhPost}>
-                {ghPostModal.busy ? 'Posting…' : 'Post comment'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
+    </>
   )
 }
 

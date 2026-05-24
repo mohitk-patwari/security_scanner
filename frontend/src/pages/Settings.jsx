@@ -32,7 +32,22 @@ export default function Settings() {
   }
 
   useEffect(() => {
-    loadSettings()
+    let cancelled = false
+    ;(async () => {
+      setLoading(true)
+      setError('')
+      try {
+        const data = await fetchMe()
+        if (!cancelled) setSettings(data)
+      } catch (err) {
+        if (!cancelled) setError(err.message || 'Failed to load settings.')
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
   }, [])
 
   const displayApiKey = useMemo(() => {
@@ -88,7 +103,6 @@ export default function Settings() {
             <div className="section-grid">
               <Info label="Organization" value={settings.org_name || '-'} />
               <Info label="User email" value={settings.user_email || '-'} />
-              <Info label="API origin" value={settings.api_url || '-'} />
             </div>
           </section>
 
@@ -140,7 +154,7 @@ export default function Settings() {
                   <li>
                     Add repository secrets:
                     <ul style={{ marginTop: '0.35rem' }}>
-                      <li><code>NETGUARD_API_URL</code> = <code>{settings.api_url}</code></li>
+                      <li><code>NETGUARD_API_URL</code> = your NetGuard API base URL (from your deployment operator)</li>
                       <li><code>NETGUARD_SECRET</code> = <code>{settings.hmac_secret}</code></li>
                       <li><code>NETGUARD_API_KEY</code> = <code>{settings.api_key_masked}</code> (use Copy API key above for full value)</li>
                     </ul>

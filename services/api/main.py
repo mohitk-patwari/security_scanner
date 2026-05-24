@@ -45,7 +45,11 @@ from services.api.auth import (
 import logging
 import time
 
-from services.autofix.github_comments import compose_fix_comment_md, post_pr_issue_comment
+from services.autofix.github_comments import (
+    compose_fix_comment_md,
+    parse_github_slug,
+    post_pr_issue_comment,
+)
 from services.autofix.deterministic_fixes import try_deterministic_fix
 from services.autofix.validators import (
     GRAPH_DEPENDENT_FINDING_TYPES,
@@ -75,7 +79,7 @@ _CORS_ORIGINS = [
 ]
 _CORS_ORIGIN_REGEX = os.getenv(
     "NETGUARD_CORS_ORIGIN_REGEX",
-    r"https?://(localhost|127\.0\.0\.1)(:\d+)?$",
+    r"https?://(localhost|127\.0\.0\.1)(:\d+)?$|^https://[a-z0-9-]+\.vercel\.app$",
 ).strip() or None
 
 app.add_middleware(
@@ -504,8 +508,14 @@ async def scan_iac(request: Request, db: Session = Depends(get_db)):
         )
 
     repository_name = payload.get("repository", "unknown-repo")
-    repository_url = payload.get("repository_url", "")
-    pr_number = payload.get("pr_number")
+    repository_url = str(payload.get("repository_url") or "").strip()
+    pr_number_raw = payload.get("pr_number")
+    pr_number: int | None = None
+    if pr_number_raw is not None and str(pr_number_raw).strip() != "":
+        try:
+            pr_number = int(pr_number_raw)
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=400, detail="pr_number must be an integer") from None
     commit_sha = payload.get("commit_sha")
 
     # Optional ephemeral GitHub PAT for this scan only — never persisted/logged.
@@ -519,15 +529,24 @@ async def scan_iac(request: Request, db: Session = Depends(get_db)):
         .filter(Repository.name == repository_name, Repository.org_id == org_id)
         .first()
     )
+    canonical_url = repository_url or (
+        f"https://github.com/{repository_name}"
+        if "/" in repository_name and not repository_name.startswith("http")
+        else repository_name
+    )
     if not repo:
         repo = Repository(
             name=repository_name,
-            url=repository_url or repository_name,
+            url=canonical_url,
             org_id=org_id,
         )
         db.add(repo)
         db.commit()
         db.refresh(repo)
+    elif repository_url:
+        if repo.url != canonical_url:
+            repo.url = canonical_url
+            db.commit()
 
     scan = Scan(
         repository_id=repo.id,
@@ -902,6 +921,8 @@ def get_scan(scan_id: int, request: Request, db: Session = Depends(get_db)):
     return {
         "id": scan.id,
         "repository_id": scan.repository_id,
+        "repository": repo.name if repo else None,
+        "repository_url": repo_url,
         "pr_number": scan.pr_number,
         "commit_sha": scan.commit_sha,
         "status": scan.status,
@@ -1315,36 +1336,63 @@ def post_fix_proposal_github_comment(
         raise HTTPException(status_code=404, detail="Fix proposal not found")
 
     scan = db.query(Scan).filter(Scan.id == prop.scan_id, Scan.org_id == org_id).first()
-    if not scan or scan.pr_number is None:
-        raise HTTPException(status_code=400, detail="Scan has no PR number for GitHub comment")
+    if not scan:
+        raise HTTPException(status_code=404, detail="Scan not found for this organization")
+    if scan.pr_number is None:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Scan has no PR number. GitHub comments require a PR scan "
+                "(set pr_number in the CI scan payload or open a PR workflow run)."
+            ),
+        )
 
     repo = db.query(Repository).filter(Repository.id == scan.repository_id).first()
     if not repo or not repo.url:
         raise HTTPException(status_code=400, detail="Repository URL missing")
 
+    slug = parse_github_slug(repo.url)
+    if not slug:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Repository URL is not a valid GitHub slug: {repo.url!r}",
+        )
+
     finding = db.query(Finding).filter(Finding.id == prop.finding_id).first()
-    body = compose_fix_comment_md(
+    comment_md = compose_fix_comment_md(
         finding_type=finding.finding_type if finding else "UNKNOWN",
         severity=finding.severity if finding else "UNKNOWN",
         scan_id=scan.id,
         patched_preview_snippet=prop.unified_diff_preview or "",
     )
 
+    owner, repo_name = slug
     try:
-        _, payload = post_pr_issue_comment(
+        _, gh_payload = post_pr_issue_comment(
             repository_url=repo.url,
             issue_number=int(scan.pr_number),
-            body=body,
+            body=comment_md,
             token=token,
         )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     except RuntimeError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
-    cid = str(payload.get("id") or "")
+    cid = str(gh_payload.get("id") or "")
+    if not cid:
+        raise HTTPException(status_code=502, detail="GitHub API returned no comment id")
+
     prop.github_comment_id = cid
     db.commit()
 
-    return {"posted": True, "github_comment_id": cid}
+    return {
+        "posted": True,
+        "github_comment_id": cid,
+        "repository": f"{owner}/{repo_name}",
+        "pr_number": int(scan.pr_number),
+        "comment_url": gh_payload.get("html_url"),
+    }
 
 
 @app.get("/api/repos")

@@ -1,4 +1,5 @@
-const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000'
+const _configured = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '')
+const API_BASE = _configured || (import.meta.env.DEV ? 'http://localhost:8000' : '')
 
 const API_KEY_STORAGE = 'netguard_api_key'
 
@@ -82,13 +83,14 @@ export async function proposeFix(scanId, findingId, body = {}) {
 export const fetchScanFixes = (scanId) => apiFetch(`/api/scans/${scanId}/fixes`)
 
 export function postGithubFixComment(proposalId, githubToken) {
+  const token = (githubToken || '').trim()
   return apiFetch(`/api/fix-proposals/${proposalId}/post-github-comment`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      ...(githubToken ? { 'X-GitHub-Token': githubToken } : {}),
+      ...(token ? { 'X-GitHub-Token': token } : {}),
     },
-    body: JSON.stringify({}),
+    body: JSON.stringify(token ? { github_token: token } : {}),
   })
 }
 

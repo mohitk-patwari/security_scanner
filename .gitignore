@@ -36,3 +36,16 @@ frontend/.vite/
 # Database
 *.sqlite3
 .netguard_dev.sqlite
+
+# Submission: only root README.md is the project markdown doc
+*.md
+!README.md
+
+# Cursor / IDE
+.cursor/
+
+# Nested clone (lives at github.com/iyertrisha/demo-guard)
+demo-guard/
+
+# Root-level duplicate screen recordings (canonical copies in docs/demos/)
+Screen Recording*.mov

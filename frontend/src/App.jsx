@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState } from 'react'
 import { Routes, Route, NavLink, useLocation, Navigate, useNavigate } from 'react-router-dom'
 import Dashboard from './pages/Dashboard'
 import ScanHistory from './pages/ScanHistory'
@@ -30,19 +30,23 @@ function ProtectedLayout() {
   const [me, setMe] = useState(null)
   const [meError, setMeError] = useState(null)
 
-  const loadMe = useCallback(async () => {
-    try {
-      const data = await fetchMe()
-      setMe(data)
-      setMeError(null)
-    } catch (err) {
-      setMeError(err)
+  useEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      try {
+        const data = await fetchMe()
+        if (!cancelled) {
+          setMe(data)
+          setMeError(null)
+        }
+      } catch (err) {
+        if (!cancelled) setMeError(err)
+      }
+    })()
+    return () => {
+      cancelled = true
     }
   }, [])
-
-  useEffect(() => {
-    loadMe()
-  }, [loadMe])
 
   function handleLogout() {
     clearStoredApiKey()

@@ -249,3 +249,38 @@ def test_propose_fixes_for_scan_endpoint(mock_propose, mock_rescore):
     assert body["scan_id"] == scan_id
     assert body["count"] == 2
     assert len(body["items"]) == 2
+
+
+@patch("services.api.main.post_pr_issue_comment")
+def test_post_github_comment_accepts_owner_repo_slug_url(mock_post):
+    mock_post.return_value = (
+        201,
+        {"id": 4242, "html_url": "https://github.com/acme/r1/issues/42#issuecomment-4242"},
+    )
+    scan_id, finding_id = _seed_scan_with_snapshot()
+    db = TestingSessionLocal()
+    repo = db.query(Repository).filter(Repository.name == "r1").first()
+    repo.url = "acme/r1"
+    proposal = FindingFixProposal(
+        scan_id=scan_id,
+        finding_id=finding_id,
+        status="validated",
+        unified_diff_preview="--- a/main.tf\n+++ b/main.tf\n",
+    )
+    db.add(proposal)
+    db.commit()
+    db.refresh(proposal)
+    proposal_id = proposal.id
+    db.close()
+
+    response = client.post(
+        f"/api/fix-proposals/{proposal_id}/post-github-comment",
+        json={},
+        headers=_AUTH,
+    )
+    assert response.status_code == 200, response.text
+    data = response.json()
+    assert data["posted"] is True
+    assert data["github_comment_id"] == "4242"
+    assert data["repository"] == "acme/r1"
+    mock_post.assert_called_once()

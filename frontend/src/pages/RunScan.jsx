@@ -44,7 +44,22 @@ export default function RunScan() {
   }
 
   useEffect(() => {
-    loadSession()
+    let cancelled = false
+    ;(async () => {
+      setLoading(true)
+      setError('')
+      try {
+        const data = await fetchMe()
+        if (!cancelled) setSettings(data)
+      } catch (err) {
+        if (!cancelled) setError(err.message || 'Failed to load settings.')
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
   }, [])
 
   const displayApiKey = useMemo(() => {
@@ -94,8 +109,9 @@ export default function RunScan() {
           {error}
           {/Not Found/i.test(error) ? (
             <p className="subtle" style={{ margin: '0.75rem 0 0' }}>
-              Restart the NetGuard API with the latest code, or confirm{' '}
-              <code>VITE_API_BASE_URL</code> points at your API (port 8000), not the Vite UI (5173).
+              Restart the NetGuard API with the latest code. For local dev, set{' '}
+              <code>VITE_API_BASE_URL=http://localhost:8000</code> in <code>frontend/.env</code>.
+              On Vercel, API calls use same-origin <code>/api/*</code> via <code>vercel.json</code> rewrites.
             </p>
           ) : null}
         </div>

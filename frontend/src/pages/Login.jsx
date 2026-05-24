@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { getStoredApiKey, login, setStoredApiKey } from '../api'
+import { getStoredApiKey, login } from '../api'
 
 export default function Login() {
   const navigate = useNavigate()
@@ -17,7 +17,7 @@ export default function Login() {
     setError('')
     setSubmitting(true)
     try {
-      const data = await login(form)
+      await login(form)
       // Login verifies password but doesn't return a key (bcrypt is one-way).
       // If user already has a key stored from signup, use that.
       // If not, they need to regenerate via Settings.

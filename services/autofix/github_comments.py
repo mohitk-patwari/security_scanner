@@ -13,14 +13,35 @@ import urllib.request
 from typing import Optional
 
 
-_GH_SLUG_RE = re.compile(r"github\.com[:/](?P<owner>[^/]+)/(?P<repo>[^/#\s]+)")
+_GH_SLUG_RE = re.compile(
+    r"github\.com[:/](?P<owner>[^/]+)/(?P<repo>[^/#\s.?]+)",
+    re.IGNORECASE,
+)
+_OWNER_REPO_RE = re.compile(r"^(?P<owner>[\w.-]+)/(?P<repo>[\w.-]+)$")
+
+
+def _normalize_repo_name(repo: str) -> str:
+    return repo.removesuffix(".git").strip("/")
 
 
 def parse_github_slug(repository_url: str) -> tuple[str, str] | None:
-    m = _GH_SLUG_RE.search(repository_url or "")
-    if not m:
+    """Return (owner, repo) from a GitHub URL or ``owner/repo`` slug."""
+    text = (repository_url or "").strip()
+    if not text:
         return None
-    return m.group("owner"), m.group("repo")
+
+    m = _GH_SLUG_RE.search(text)
+    if m:
+        return m.group("owner"), _normalize_repo_name(m.group("repo"))
+
+    if text.startswith("http://") or text.startswith("https://"):
+        return None
+
+    slug = _OWNER_REPO_RE.match(text)
+    if slug:
+        return slug.group("owner"), _normalize_repo_name(slug.group("repo"))
+
+    return None
 
 
 def post_pr_issue_comment(

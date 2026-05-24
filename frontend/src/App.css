@@ -589,19 +589,115 @@ select {
 .modal-backdrop {
   position: fixed;
   inset: 0;
-  z-index: 200;
+  z-index: 10000;
   display: flex;
   align-items: center;
   justify-content: center;
   padding: 1rem;
-  background: rgba(2, 6, 23, 0.72);
-  backdrop-filter: blur(4px);
+  background: rgba(2, 6, 23, 0.78);
+  backdrop-filter: blur(3px);
+  isolation: isolate;
+}
+
+.modal-backdrop-success {
+  background: rgba(2, 6, 23, 0.82);
 }
 
 .modal-card {
   width: min(480px, 100%);
   margin: 0;
   box-shadow: var(--shadow-soft);
+}
+
+.modal-card-solid {
+  width: min(440px, 100%);
+  margin: 0;
+  padding: 1.5rem 1.35rem;
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--border);
+  background: #0f172a;
+  color: var(--text-primary);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.55);
+  animation: modalPopIn 220ms ease both;
+}
+
+.modal-card-success {
+  text-align: center;
+  border-color: color-mix(in srgb, var(--success) 45%, var(--border));
+}
+
+.modal-title {
+  margin: 0 0 0.65rem;
+  font-size: 1.15rem;
+}
+
+.modal-body-text {
+  margin: 0 0 1rem;
+  color: var(--text-muted);
+  line-height: 1.55;
+  font-size: 0.95rem;
+}
+
+.modal-actions {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 1.25rem;
+  justify-content: flex-end;
+}
+
+.modal-actions-center {
+  justify-content: center;
+}
+
+.modal-success-icon {
+  display: flex;
+  justify-content: center;
+  margin-bottom: 0.75rem;
+  color: var(--success);
+}
+
+.modal-success-headline {
+  margin: 0 0 0.65rem;
+  font-size: 1.35rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  line-height: 1.3;
+}
+
+.modal-success-message {
+  margin-bottom: 0.5rem;
+  color: var(--text-primary);
+}
+
+.modal-success-meta {
+  margin: 0 0 1rem;
+  font-size: 0.88rem;
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.modal-success-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-bottom: 0.5rem;
+  text-decoration: none;
+}
+
+.modal-ok-btn {
+  min-width: 120px;
+  padding: 0.55rem 1.5rem;
+}
+
+@keyframes modalPopIn {
+  from {
+    opacity: 0;
+    transform: scale(0.94) translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
