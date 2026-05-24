@@ -45,27 +45,15 @@ NetGuard scans Terraform and Kubernetes in pull requests, builds a network topol
 
 ## Demo videos
 
-**Full demo page (HTML player):** [docs/demos/index.html](./docs/demos/index.html) — clone the repo, run `git lfs pull`, then open that file in your browser.
+Recordings are in **Git LFS** under `docs/demos/`. Click a link to open GitHub’s built-in video player on the file page.
 
-Recordings are stored with **Git LFS**. After clone, run `git lfs pull` so the players below can load the files.
+| Demo | Watch (GitHub LFS player) |
+|------|---------------------------|
+| Dashboard, login, and scan overview | [01-netguard-dashboard-and-scan.mov](https://github.com/iyertrisha/security_scanner/blob/main/docs/demos/01-netguard-dashboard-and-scan.mov) |
+| PR scan results and findings | [02-pr-scan-and-findings.mov](https://github.com/iyertrisha/security_scanner/blob/main/docs/demos/02-pr-scan-and-findings.mov) |
+| LLM autofix and post comment to GitHub PR | [03-autofix-and-github-pr-comment.mov](https://github.com/iyertrisha/security_scanner/blob/main/docs/demos/03-autofix-and-github-pr-comment.mov) |
 
-### 1. Dashboard, login, and scan overview
-
-<video controls playsinline preload="metadata" width="100%" src="https://media.githubusercontent.com/media/iyertrisha/security_scanner/main/docs/demos/01-netguard-dashboard-and-scan.mov">
-  <a href="./docs/demos/01-netguard-dashboard-and-scan.mov">Download 01-netguard-dashboard-and-scan.mov</a>
-</video>
-
-### 2. PR scan results and findings
-
-<video controls playsinline preload="metadata" width="100%" src="https://media.githubusercontent.com/media/iyertrisha/security_scanner/main/docs/demos/02-pr-scan-and-findings.mov">
-  <a href="./docs/demos/02-pr-scan-and-findings.mov">Download 02-pr-scan-and-findings.mov</a>
-</video>
-
-### 3. LLM autofix and post comment to GitHub PR
-
-<video controls playsinline preload="metadata" width="100%" src="https://media.githubusercontent.com/media/iyertrisha/security_scanner/main/docs/demos/03-autofix-and-github-pr-comment.mov">
-  <a href="./docs/demos/03-autofix-and-github-pr-comment.mov">Download 03-autofix-and-github-pr-comment.mov</a>
-</video>
+After clone, run `git lfs pull` to download the `.mov` files locally.
 
 ---
 
